@@ -6,19 +6,19 @@ Import-Module ActiveDirectory
 # -------------------------------
 # Config
 # -------------------------------
-$group               = "V-AFG001-APP-Part48-GASA-Access"
-$emailColumnName     = "Email"
-$jobSeriesColumnName = "Job Series"
-$filePath            = ".\Emails.xlsx"
-$sheetName           = "Sheet1"
-$targetJobSeries     = "2152"   # keep as string to avoid Excel numeric quirks
+$group = "V-AFG001-APP-Part48-GASA-Access"
+$emailColumnName = "Email Address Work"
+$jobSeriesColumnName = "Occupational Series"
+$filePath = ".\AFG Employee Roster.xlsx"
+$sheetName = "Roster"
+$targetJobSeries = @("1825", "1802")   # keep as string to avoid Excel numeric quirks
 
 # If you want to actually apply changes, set to $true (requires permissions)
-$applyChanges         = $false
+$applyChanges = $false
 
 # Progress/log tuning (group is ~1500 now; this scales well as it grows)
-$progressEvery        = 100     # update Write-Progress every N items
-$logEvery             = 250     # heartbeat log every N items
+$progressEvery = 100     # update Write-Progress every N items
+$logEvery = 250     # heartbeat log every N items
 
 # -------------------------------
 # Logging helpers
@@ -42,10 +42,16 @@ try {
     $rows = Import-Excel $filePath -WorksheetName $sheetName
     Log "Excel rows loaded: $($rows.Count)"
 
-    Log "Filtering rows where '$jobSeriesColumnName' == $targetJobSeries ..."
+    Log "Filtering rows where '$jobSeriesColumnName' in $($targetJobSeries -join ', ') ..."
+    # build normalized set for fast, case-insensitive lookup
+    $targetJobSeriesSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($ts in $targetJobSeries) {
+        if ($null -ne $ts -and -not [string]::IsNullOrWhiteSpace($ts)) { [void]$targetJobSeriesSet.Add($ts.ToString().Trim()) }
+    }
+
     $filtered = $rows | Where-Object {
         $js = ($_.("$jobSeriesColumnName")).ToString().Trim()
-        $js -eq $targetJobSeries
+        $targetJobSeriesSet.Contains($js)
     }
     Log "Filtered rows: $($filtered.Count)"
 
@@ -78,7 +84,7 @@ try {
         $i++
 
         if (($i % $progressEvery) -eq 0 -or $i -eq 1 -or $i -eq $total) {
-            Write-Progress -Activity "Resolving Excel emails in AD" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1,$total)))
+            Write-Progress -Activity "Resolving Excel emails in AD" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1, $total)))
         }
         if (($i % $logEvery) -eq 0) {
             Log "Resolved $i / $total emails..."
@@ -88,9 +94,9 @@ try {
         if ([string]::IsNullOrWhiteSpace($emailTrim)) { continue }
 
         # Prefer mail match; fallback to UPN match
-        $user = Get-ADUser -Filter "mail -eq '$emailTrim'" -Properties mail,UserPrincipalName,DistinguishedName -ErrorAction SilentlyContinue
+        $user = Get-ADUser -Filter "mail -eq '$emailTrim'" -Properties mail, UserPrincipalName, DistinguishedName -ErrorAction SilentlyContinue
         if ($null -eq $user) {
-            $user = Get-ADUser -Filter "UserPrincipalName -eq '$emailTrim'" -Properties mail,UserPrincipalName,DistinguishedName -ErrorAction SilentlyContinue
+            $user = Get-ADUser -Filter "UserPrincipalName -eq '$emailTrim'" -Properties mail, UserPrincipalName, DistinguishedName -ErrorAction SilentlyContinue
         }
 
         if ($null -eq $user) {
@@ -134,7 +140,7 @@ try {
     foreach ($m in $currentUserMembers) {
         $i++
         if (($i % $progressEvery) -eq 0 -or $i -eq 1 -or $i -eq $total) {
-            Write-Progress -Activity "Building current membership set (DNs)" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1,$total)))
+            Write-Progress -Activity "Building current membership set (DNs)" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1, $total)))
         }
         if (($i % $logEvery) -eq 0) {
             Log "Processed $i / $total group user members..."
@@ -154,7 +160,7 @@ try {
     # -------------------------------
     Log "Computing delta (target list is source of truth)..."
 
-    $toAddDn    = New-Object System.Collections.Generic.List[string]
+    $toAddDn = New-Object System.Collections.Generic.List[string]
     $toRemoveDn = New-Object System.Collections.Generic.List[string]
     $skippedCount = 0
 
@@ -183,7 +189,8 @@ try {
 
     if ($applyChanges) {
         Log "Applying changes to AD group (applyChanges = $applyChanges)..."
-    } else {
+    }
+    else {
         Log "Dry run only (applyChanges = $applyChanges). No changes will be made."
     }
 
@@ -193,7 +200,7 @@ try {
     foreach ($dn in $toAddDn) {
         $i++
         if (($i % $progressEvery) -eq 0 -or $i -eq 1 -or $i -eq $total) {
-            Write-Progress -Activity "Adding members" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1,$total)))
+            Write-Progress -Activity "Adding members" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1, $total)))
         }
 
         try {
@@ -204,7 +211,8 @@ try {
             if (($i -le 10) -or (($i % $logEvery) -eq 0) -or ($i -eq $total)) {
                 Log "ADD    : $dn"
             }
-        } catch {
+        }
+        catch {
             $addFailed++
             Write-Warning "FAILED ADD $dn : $($_.Exception.Message)"
         }
@@ -217,7 +225,7 @@ try {
     foreach ($dn in $toRemoveDn) {
         $i++
         if (($i % $progressEvery) -eq 0 -or $i -eq 1 -or $i -eq $total) {
-            Write-Progress -Activity "Removing members" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1,$total)))
+            Write-Progress -Activity "Removing members" -Status "$i / $total" -PercentComplete ([int](100 * $i / [math]::Max(1, $total)))
         }
 
         try {
@@ -228,7 +236,8 @@ try {
             if (($i -le 10) -or (($i % $logEvery) -eq 0) -or ($i -eq $total)) {
                 Log "REMOVE : $dn"
             }
-        } catch {
+        }
+        catch {
             $removeFailed++
             Write-Warning "FAILED REMOVE $dn : $($_.Exception.Message)"
         }
@@ -241,7 +250,7 @@ try {
     Write-Host ""
     Write-Host "========== SUMMARY =========="
     Write-Host "Group: $group"
-    Write-Host "Target Job Series: $targetJobSeries"
+    Write-Host "Target Job Series: $($targetJobSeries -join ', ')"
     Write-Host "Excel rows loaded: $($rows.Count)"
     Write-Host "Target rows (Job Series match): $($filtered.Count)"
     Write-Host "Target list (unique emails): $($targetEmails.Count)"
@@ -264,7 +273,8 @@ try {
         }
     }
 
-} finally {
+}
+finally {
     Stop-Transcript | Out-Null
     Log "Done."
 }
