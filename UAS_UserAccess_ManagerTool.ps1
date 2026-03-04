@@ -7,10 +7,10 @@ Import-Module ActiveDirectory
 # Config
 # -------------------------------
 $group = "V-AFG001-APP-Part48-GASA-Access"
-$emailColumnName = "Email Address Work"
-$jobSeriesColumnName = "Occupational Series"
 $filePath = ".\AFG Employee Roster.xlsx"
 $sheetName = "Roster"
+$emailColumnName = "Email Address Work"
+$jobSeriesColumnName = "Occupational Series"
 $targetJobSeries = @("1825", "1802")   # keep as string to avoid Excel numeric quirks
 
 # If you want to actually apply changes, set to $true (requires permissions)
